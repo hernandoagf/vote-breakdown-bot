@@ -1,11 +1,14 @@
 import discord
-from typing import Optional
-from discord import app_commands
+from discord import app_commands, Interaction
 import os
 from dotenv import load_dotenv
 import logging
-from datetime import datetime, timezone
-from helpers import *
+from helpers import get_polls, get_executives, generate_progress_bar
+from ui_elements import VotesEmbed, NavigationRow
+from constants import VoteType
+import schedule
+import requests
+from typing import Optional
 
 load_dotenv()
 bot_token = os.getenv("BOT_TOKEN")
@@ -16,78 +19,35 @@ class MyClient(discord.Client):
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
-    # async def setup_hook(self):
-    #     await self.tree.sync()
+    async def setup_hook(self):
+        await self.tree.sync()
 
 
 intents = discord.Intents.default()
 client = MyClient(intents=intents)
+poll_tags = []
 
 
-class VotesEmbed(discord.Embed):
-    def __init__(self, image, footer_text=None):
-        super().__init__(
-            title="Active votes",
-            description="Vote breakdown for currently active on-chain polls and executive votes",
-            color=0xF4B731,
-            timestamp=datetime.now(timezone.utc),
-        )
-        self.set_image(url=image)
-        self.set_footer(text=footer_text)
+def fetch_tags_job():
+    print("Executing job")
+    response = requests.get(
+        "https://raw.githubusercontent.com/makerdao/community/master/governance/polls/meta/tags.json"
+    )
+    data = response.json()
+    global poll_tags
+    poll_tags = [tag["id"] for tag in data]
 
 
-class NavigationRow(discord.ui.View):
-    def __init__(self, results):
-        super().__init__()
-        self.value = None
-        self.results = results
-        self.page = 0
+schedule.every(10).seconds.do(fetch_tags_job)
+schedule.run_all()
 
-    @discord.ui.button(emoji="⬅️", disabled=True, custom_id="previous_button")
-    async def navigate_previous(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        self.page -= 1
-        if self.children[1].disabled:
-            self.children[1].disabled = False
-        button.disabled = True if self.page == 0 else False
-        items_displayed = (self.page * 3, (self.page * 3) + 3)
 
-        generate_progress_bar(self.results[(items_displayed[0]) : (items_displayed[1])])
-        progress_bar_file = discord.File("progress_bars.png")
-
-        await interaction.response.edit_message(
-            attachments=[progress_bar_file],
-            embed=VotesEmbed(
-                image="attachment://progress_bars.png",
-                footer_text=f"Displaying {items_displayed[0] + 1}-{items_displayed[1]} of {len(self.results)} active votes",
-            ),
-            view=self,
-        )
-
-    @discord.ui.button(emoji="➡️", disabled=False, custom_id="next_button")
-    async def navigate_next(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        self.page += 1
-        if self.children[0].disabled:
-            self.children[0].disabled = False
-        button.disabled = True if (self.page * 3) + 3 >= len(self.results) else False
-        items_displayed = (
-            self.page * 3,
-            len(self.results) if button.disabled else (self.page * 3) + 3,
-        )
-        generate_progress_bar(self.results[items_displayed[0] : items_displayed[1]])
-        progress_bar_file = discord.File("progress_bars.png")
-
-        await interaction.response.edit_message(
-            attachments=[progress_bar_file],
-            embed=VotesEmbed(
-                image="attachment://progress_bars.png",
-                footer_text=f"Displaying {items_displayed[0] + 1}-{items_displayed[1]} of {len(self.results)} active votes",
-            ),
-            view=self,
-        )
+async def tag_autocomplete(interaction: Interaction, current: str):
+    return [
+        app_commands.Choice(name=tag, value=tag)
+        for tag in poll_tags
+        if current.lower() in tag.lower()
+    ][:25]
 
 
 @client.event
@@ -95,47 +55,96 @@ async def on_ready():
     print(f"We have logged in as {client.user}")
 
 
-@client.tree.command()
-async def votes(interaction: discord.Interaction):
-    """Displays the vote breakdown for the currently active on-chain votes"""
+polls_group = app_commands.Group(
+    name="test", description="Displays the vote breakdown for on-chain polls"
+)
 
-    await interaction.response.defer()
 
-    active_votes = get_active_votes()
-    results = get_votes_results(active_votes)
-    votes_length = len(results)
+@polls_group.command(name="finished")
+async def finished_votes(interaction: Interaction):
+    await interaction.response.send_message("Hello")
 
-    generate_progress_bar(results if votes_length <= 3 else results[0:3])
-    progress_bar_file = discord.File("progress_bars.png")
 
-    if votes_length <= 3:
-        await interaction.followup.send(
-            file=progress_bar_file,
-            embed=VotesEmbed(image="attachment://progress_bars.png"),
-        )
-    else:
-        await interaction.followup.send(
-            file=progress_bar_file,
-            embed=VotesEmbed(
-                image="attachment://progress_bars.png",
-                footer_text=f"Displaying 1-3 of {votes_length} active votes",
-            ),
-            view=NavigationRow(results=results),
-        )
+client.tree.add_command(polls_group)
 
 
 @client.tree.command()
-@app_commands.describe(poll_id="ID of the poll")
-async def poll_results(interaction: discord.Interaction, poll_id: int):
-    """Displays the vote breakdown for a poll"""
+@app_commands.describe(
+    tag="Optional: the poll tag to filter for",
+    finished="Optional: whether to display finished instead of active polls",
+)
+@app_commands.autocomplete(tag=tag_autocomplete)
+async def votes(
+    interaction: Interaction,
+    tag: Optional[str],
+    test_param: discord.AppCommandType,
+    finished: bool = False,
+):
+    """Displays the vote breakdown for on-chain polls"""
+
+    if tag:
+        tag = tag.lower()
+    if tag and tag not in poll_tags:
+        await interaction.response.send_message(
+            content="The tag you specified was not found in the list of available tags, please try again.",
+            ephemeral=True,
+        )
+        return
 
     await interaction.response.defer()
 
-    poll_votes = get_poll_votes(poll_id)
-    generate_progress_bar(poll_votes)
-
+    polls = get_polls(finished, tag)
+    polls_length = len(polls)
+    generate_progress_bar(polls[0])
     progress_bar_file = discord.File("progress_bars.png")
-    await interaction.followup.send(file=progress_bar_file)
+
+    await interaction.followup.send(
+        file=progress_bar_file,
+        embed=VotesEmbed(
+            vote_type=VoteType.POLL.value,
+            vote=polls[0],
+            tag_filter=tag,
+            votes_length=polls_length,
+            finished=finished,
+        ),
+        view=NavigationRow(
+            votes=polls,
+            vote_type=VoteType.POLL.value,
+            vote_selected=polls[0],
+            finished=finished,
+        ),
+    )
+
+
+@client.tree.command(name="execs")
+@app_commands.describe(
+    finished="Optional: whether to display finished instead of active or latest executive votes",
+)
+async def executives(interaction: Interaction, finished: bool = False):
+    """Displays the vote breakdown for executive votes"""
+
+    await interaction.response.defer()
+
+    found_execs = get_executives()
+    execs_length = len(found_execs)
+    generate_progress_bar(found_execs[0])
+    progress_bar_file = discord.File("progress_bars.png")
+
+    await interaction.followup.send(
+        file=progress_bar_file,
+        embed=VotesEmbed(
+            vote_type=VoteType.EXECUTIVE.value,
+            vote=found_execs[0],
+            votes_length=execs_length,
+            finished=finished,
+        ),
+        view=NavigationRow(
+            votes=found_execs,
+            vote_type=VoteType.EXECUTIVE.value,
+            vote_selected=found_execs[0],
+            finished=finished,
+        ),
+    )
 
 
 client.run(bot_token, log_handler=logging.StreamHandler())
