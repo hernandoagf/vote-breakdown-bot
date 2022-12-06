@@ -1,6 +1,6 @@
 import requests
 from locale import LC_ALL, setlocale, format_string
-from datetime import datetime as dt, timezone
+from datetime import datetime as dt, timezone, timedelta
 from PIL import Image, ImageDraw, ImageFont
 from math import floor
 
@@ -77,13 +77,42 @@ def get_polls(finished: bool, tag):
             {
                 "option_name": result["optionName"],
                 "option_id": result["optionId"],
-                "mkr_support": float(result["mkrSupport"]),
-                "percentage": result["firstPct"] / 100,
+                "mkr_support": float(result["mkrSupport"])
+                + float(result.get("transfer", 0)),
+                "percentage": (result["firstPct"] + result.get("transferPct", 0)) / 100,
             }
             for result in data["results"]
         ]
 
-    return polls
+    return sorted(polls, key=lambda poll: poll["id"])
+
+
+def get_new_polls():
+    """Gets the list of polls posted in the last 24 hours"""
+
+    response = requests.get("https://vote.makerdao.com/api/polling/all-polls")
+    data = response.json()
+    current_date = dt.now(timezone.utc)
+    one_day = timedelta(days=1)
+
+    new_polls = [
+        poll
+        for poll in data["polls"]
+        if dt.strptime(poll["startDate"], "%Y-%m-%dT%H:%M:%S.%f%z")
+        >= current_date - one_day
+    ]
+
+    return [
+        {
+            "id": poll["pollId"],
+            "title": poll["title"],
+            "github": poll["url"].replace(
+                "raw.githubusercontent.com/makerdao/community/",
+                "github.com/makerdao/community/blob/",
+            ),
+        }
+        for poll in new_polls
+    ]
 
 
 def generate_progress_bar(vote):
