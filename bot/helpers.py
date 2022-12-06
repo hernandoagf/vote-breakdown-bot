@@ -1,10 +1,10 @@
 import requests
-from locale import LC_ALL, setlocale, format_string
+from locale import LC_ALL, setlocale, getdefaultlocale, format_string
 from datetime import datetime as dt, timezone, timedelta
 from PIL import Image, ImageDraw, ImageFont
 from math import floor
 
-setlocale(LC_ALL, "en_US")
+setlocale(LC_ALL, getdefaultlocale())
 
 
 def get_executives():
