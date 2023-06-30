@@ -31,8 +31,18 @@ env:
 externalSecrets:
   clusterSecretStoreName: maker-prod
 livenessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - ps -ef | grep app.py | grep -v grep
   initialDelaySeconds: 5
   periodSeconds: 30
 readinessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - ps -ef | grep app.py | grep -v grep
   initialDelaySeconds: 5
   periodSeconds: 30
