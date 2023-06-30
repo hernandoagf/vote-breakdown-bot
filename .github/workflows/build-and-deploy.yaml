@@ -45,7 +45,7 @@ jobs:
       with:
         values: image.repository=${{ env.DOCKER_IMAGE_REGISTRY }},image.tag=${{ env.DOCKER_IMAGE_TAG }}
         cluster-name: ${{ env.CLUSTER_NAME }}
-        config-files: deploy/prod/vote-breakdown-bot.yaml
+        config-files: deploy/production/vote-breakdown-bot.yaml
         chart-path: makerops/common
         namespace: discord-bots
         timeout: 5m0s
