@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-      - TECH-1848
+      - main
 
 name: Build Docker image and deploy it to Kubernetes cluster
 
