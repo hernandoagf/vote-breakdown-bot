@@ -1,0 +1,48 @@
+replicaCount: 1
+service:
+  name: vote-breakdown-bot
+  port: 8080
+  type: ClusterIP
+  containerPort: 8080
+  tls:
+    enabled: false
+image:
+  pullPolicy: Always
+serviceAccount:
+  create: false
+ingress:
+  enabled: false
+podAnnotations:
+  reloader.stakater.com/auto: "true"
+resources:
+  limits:
+    cpu: 500m
+    memory: 1024Mi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+autoscaling:
+  enabled: false
+env:
+  BOT_TOKEN:
+    type: parameterStore
+    name: github-token
+    parameter_name: /eks/maker-prod/vote-breakdown-bot/bot-token
+externalSecrets:
+  clusterSecretStoreName: maker-prod
+livenessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - ps -ef | grep app.py | grep -v grep
+  initialDelaySeconds: 5
+  periodSeconds: 30
+readinessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - ps -ef | grep app.py | grep -v grep
+  initialDelaySeconds: 5
+  periodSeconds: 30
