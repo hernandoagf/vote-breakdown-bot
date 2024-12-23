@@ -16,7 +16,7 @@ podAnnotations:
   reloader.stakater.com/auto: "true"
 resources:
   limits:
-    memory: 1Gi
+    memory: 64Mi
   requests:
     cpu: 1m
     memory: 40Mi
